@@ -29,11 +29,11 @@
 #undef SCE_ELF_DEFS_TARGET
 #include <self.h>
 
-#define NID_MODULE_STOP     0x79F8E492
-#define NID_MODULE_EXIT     0x913482A9
-#define NID_MODULE_START    0x935CD196
-#define NID_MODULE_INFO     0x6C2224BA
-#define NID_PROCESS_PARAM   0x70FBA1E7
+#define NID_MODULE_STOP 0x79F8E492
+#define NID_MODULE_EXIT 0x913482A9
+#define NID_MODULE_START 0x935CD196
+#define NID_MODULE_INFO 0x6C2224BA
+#define NID_PROCESS_PARAM 0x70FBA1E7
 
 #include <miniz.h>
 
@@ -51,18 +51,13 @@ static bool load_var_imports(const uint32_t *nids, const Ptr<uint32_t> *entries,
     for (size_t i = 0; i < count; ++i) {
         const uint32_t nid = nids[i];
         const Ptr<uint32_t> entry = entries[i];
-        
+
         if (LOG_IMPORTS) {
             const char *const name = import_name(nid);
             LOG_DEBUG("\tNID {:#08x} ({}) at {:#x}", nid, name, entry.address());
         }
-        
-        /*uint32_t *const stub = entry.get(mem);
-        stub[0] = 0xef000000; // svc #0 - Call our interrupt hook.
-        stub[1] = 0xe1a0f00e; // mov pc, lr - Return to the caller.
-        stub[2] = nid; // Our interrupt hook will read this.*/
     }
-    
+
     return true;
 }
 
@@ -105,7 +100,7 @@ static bool load_imports(const sce_module_info_raw &module, Ptr<const void> segm
         if (!load_func_imports(nids, entries, imports->num_syms_funcs, mem)) {
             return false;
         }
-        
+
         const uint32_t *const var_nids = Ptr<const uint32_t>(imports->var_nid_table).get(mem);
         const Ptr<uint32_t> *const var_entries = Ptr<Ptr<uint32_t>>(imports->var_entry_table).get(mem);
         if (!load_var_imports(var_nids, var_entries, imports->num_syms_vars, mem)) {
@@ -125,21 +120,17 @@ static bool load_func_exports(Ptr<const void> &entry_point, const uint32_t *nids
             entry_point = entry;
             continue;
         }
-        
+
         if (nid == NID_MODULE_STOP || nid == NID_MODULE_EXIT)
             continue;
-        
-        kernel.export_nids.emplace(nid,entry.address());
-        
+
+        kernel.export_nids.emplace(nid, entry.address());
+
         if (LOG_EXPORTS) {
             const char *const name = import_name(nid);
-            
+
             LOG_DEBUG("\tNID {:#08x} ({}) at {:#x}", nid, name, entry.address());
         }
-        /*uint32_t *const stub = entry.get(mem);
-        stub[0] = 0xef000000; // svc #0 - Call our interrupt hook.
-        stub[1] = 0xe1a0f00e; // mov pc, lr - Return to the caller.
-        stub[2] = nid; // Our interrupt hook will read this.*/
     }
 
     return true;
@@ -149,42 +140,37 @@ static bool load_var_exports(Ptr<const void> &entry_point, const uint32_t *nids,
     for (size_t i = 0; i < count; ++i) {
         const uint32_t nid = nids[i];
         const Ptr<uint32_t> entry = entries[i];
-        
-        if(nid == NID_PROCESS_PARAM) {
+
+        if (nid == NID_PROCESS_PARAM) {
             kernel.process_param = entry;
             LOG_DEBUG("\tNID {:#08x} (SCE_PROC_PARAMS) at {:#x}", nid, entry.address());
             continue;
         }
-        
-        if(nid == NID_MODULE_INFO) {
+
+        if (nid == NID_MODULE_INFO) {
             LOG_DEBUG("\tNID {:#08x} (NID_MODULE_INFO) at {:#x}", nid, entry.address());
             continue;
         }
-        
-        if(nid == 0x936c8a78) {
+
+        if (nid == 0x936c8a78) {
             LOG_DEBUG("\tNID {:#08x} (SYSLYB) at {:#x}", nid, entry.address());
             continue;
         }
-        
+
         if (LOG_EXPORTS) {
             const char *const name = import_name(nid);
-            
+
             LOG_DEBUG("\tNID {:#08x} ({}) at {:#x}", nid, name, entry.address());
-            
         }
-        
+
         /*if (nid == 0x935cd196) {
             entry_point = entry;
             return true;
         }*/
-        
-        kernel.export_nids.emplace(nid,entry.address());
-        /*uint32_t *const stub = entry.get(mem);
-         stub[0] = 0xef000000; // svc #0 - Call our interrupt hook.
-         stub[1] = 0xe1a0f00e; // mov pc, lr - Return to the caller.
-         stub[2] = nid; // Our interrupt hook will read this.*/
+
+        kernel.export_nids.emplace(nid, entry.address());
     }
-    
+
     return true;
 }
 
@@ -201,18 +187,15 @@ static bool load_exports(Ptr<const void> &entry_point, const sce_module_info_raw
             LOG_INFO("Loading exports from {}", lib_name);
         }
 
-        
         const uint32_t *const nids = Ptr<const uint32_t>(exports->nid_table).get(mem);
         const Ptr<uint32_t> *const entries = Ptr<Ptr<uint32_t>>(exports->entry_table).get(mem);
         if (!load_func_exports(entry_point, nids, entries, exports->num_syms_funcs, kernel, mem)) {
             return false;
         }
-        
+
         if (!load_var_exports(entry_point, &nids[exports->num_syms_funcs], &entries[exports->num_syms_funcs], exports->num_syms_vars, kernel, mem)) {
             return false;
         }
-        
-        
     }
 
     return true;
@@ -223,7 +206,6 @@ SceUID load_self(Ptr<const void> &entry_point, KernelState &kernel, MemState &me
     const SCE_header &self_header = *static_cast<const SCE_header *>(self);
 
     // assumes little endian host
-    // TODO: do it in a better way, perhaps with user-defined literals that do the conversion automatically (magic != "SCE\0"_u32)
     if (!memcmp(&self_header.magic, "\0ECS", 4)) {
         LOG_CRITICAL("(S)ELF is corrupt or encrypted. Decryption not yet supported.");
         return -1;

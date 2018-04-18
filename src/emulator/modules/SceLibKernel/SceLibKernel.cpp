@@ -22,6 +22,7 @@
 #include <io/functions.h>
 #include <kernel/functions.h>
 #include <kernel/thread_functions.h>
+#include <util/log.h>
 
 #include <kernel/load_self.h>
 #include <psp2/kernel/error.h>
@@ -158,7 +159,8 @@ EXPORT(int, sceClibMspaceReallocalign) {
     return unimplemented("sceClibMspaceReallocalign");
 }
 
-EXPORT(int, sceClibPrintf) {
+EXPORT(int, sceClibPrintf, const char* msg) {
+    LOG_INFO("{}", msg);
     return unimplemented("sceClibPrintf");
 }
 

@@ -37,6 +37,8 @@ struct MemState {
     GenerationNames generation_names;
 };
 
+extern MemState *g_mem;
+
 constexpr size_t KB(size_t kb) {
     return kb * 1024;
 }

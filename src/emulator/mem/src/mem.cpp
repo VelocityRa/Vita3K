@@ -31,6 +31,8 @@
 #include <unistd.h>
 #endif
 
+MemState *g_mem;
+
 static void delete_memory(uint8_t *memory) {
     if (memory != nullptr) {
 #ifdef WIN32
@@ -97,7 +99,7 @@ bool init(MemState &state) {
 #else
     mprotect(state.memory.get(), state.page_size, PROT_NONE);
 #endif
-
+    g_mem = &state;
     return true;
 }
 

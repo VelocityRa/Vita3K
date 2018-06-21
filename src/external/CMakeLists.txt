@@ -39,10 +39,36 @@ endif()
 add_library(elfio INTERFACE)
 target_include_directories(elfio INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/elfio")
 
+# fmt
+#add_library(fmt_in INTERFACE)
+#target_include_directories(fmt_in INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/fmt/include")
+#add_subdirectory(fmt)
+
+# dynarmic
+if(MSVC)
+	add_definitions(-D_HAS_AUTO_PTR_ETC -D_HAS_FUNCTION_ASSIGN -D_HAS_OLD_IOSTREAMS_MEMBERS -D_HAS_TR1_NAMESPACE)
+endif()
+if (CMAKE_COMPILER_IS_GNUCC)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-new-ttp-matching")
+endif()
+add_library(xbyak INTERFACE)
+set(DYNARMIC_TESTS OFF)
+set(DYNARMIC_NO_BUNDLED_FMT OFF)
+#add_library(dynarmic INTERFACE)
+#target_include_directories(dynarmic PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/dynarmic/include")
+# target_compile_definitions
+add_subdirectory(dynarmic)
+
 # spdlog
 add_library(spdlog INTERFACE)
 target_include_directories(spdlog INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/spdlog/include")
-target_compile_definitions(spdlog INTERFACE SPDLOG_WCHAR_FILENAMES=1 SPDLOG_NO_THREAD_ID=1)
+target_compile_definitions(spdlog INTERFACE SPDLOG_WCHAR_FILENAMES=1 SPDLOG_NO_THREAD_ID=1 SPDLOG_FMT_EXTERNAL=1)
+
+# Defined before "dynarmic" above
+# add_library(xbyak INTERFACE)
+target_include_directories(xbyak INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/dynarmic/externals/xbyak/xbyak")
+target_compile_definitions(xbyak INTERFACE XBYAK_NO_OP_NAMES)
+
 
 # glbinding
 option(BUILD_SHARED_LIBS "Build shared instead of static libraries." OFF)

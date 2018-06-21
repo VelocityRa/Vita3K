@@ -21,6 +21,8 @@
 
 #include <cstdint>
 #include <functional>
+#include "dynarmic/A32/a32.h"
+
 
 struct CPUState;
 struct MemState;
@@ -40,3 +42,5 @@ void write_reg(CPUState &state, size_t index, uint32_t value);
 void write_sp(CPUState &state, uint32_t value);
 void write_pc(CPUState &state, uint32_t value);
 void write_lr(CPUState &state, uint32_t value);
+
+extern Dynarmic::A32::Jit *g_jit;

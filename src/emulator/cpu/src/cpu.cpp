@@ -23,6 +23,7 @@
 #include <util/log.h>
 
 #include <unicorn/unicorn.h>
+#include <cpu/cpu_dynarmic.h>
 
 #include <cassert>
 #include <cstring>
@@ -36,12 +37,17 @@ union DoubleReg {
     float f[2];
 };
 
+Dynarmic::A32::Jit *g_jit;
+
 struct CPUState {
     MemState *mem = nullptr;
     CallSVC call_svc;
     DisasmState disasm;
     UnicornPtr uc;
     Address entry_point;
+        
+    std::unique_ptr<DynarmicCallbacks> cb;
+    std::unique_ptr<Dynarmic::A32::Jit> jit;
 };
 
 static const bool LOG_CODE = true;
@@ -51,20 +57,36 @@ static void delete_cpu_state(CPUState *state) {
     delete state;
 }
 
-static bool is_thumb_mode(uc_engine *uc) {
+static bool is_thumb_mode(const CPUState &cpu) {
+
+    return cpu.jit->Cpsr() & 0b10000;
+
+    /*
     size_t mode = 0;
     const uc_err err = uc_query(uc, UC_QUERY_MODE, &mode);
     assert(err == UC_ERR_OK);
 
     return mode & UC_MODE_THUMB;
+    */
 }
 
-static void code_hook(uc_engine *uc, uint64_t address, uint32_t size, void *user_data) {
+static void code_hook_dynarmic(CPUState &cpu, uint64_t address, uint32_t size, void *user_data) {
     CPUState &state = *static_cast<CPUState *>(user_data);
     const MemState &mem = *state.mem;
     const uint8_t *const code = Ptr<const uint8_t>(static_cast<Address>(address)).get(mem);
     const size_t buffer_size = GB(4) - address;
-    const bool thumb = is_thumb_mode(uc);
+    const bool thumb = is_thumb_mode(cpu);
+    const std::string disassembly = disassemble(state.disasm, code, buffer_size, address, thumb);
+    LOG_TRACE("{} {}", log_hex(address), disassembly);
+}
+
+/*
+static void code_hook(CPUState &cpu, uint64_t address, uint32_t size, void *user_data) {
+    CPUState &state = *static_cast<CPUState *>(user_data);
+    const MemState &mem = *state.mem;
+    const uint8_t *const code = Ptr<const uint8_t>(static_cast<Address>(address)).get(mem);
+    const size_t buffer_size = GB(4) - address;
+    const bool thumb = is_thumb_mode(cpu);
     const std::string disassembly = disassemble(state.disasm, code, buffer_size, address, thumb);
     LOG_TRACE("{} {}", log_hex(address), disassembly);
 }
@@ -114,6 +136,7 @@ static void intr_hook(uc_engine *uc, uint32_t intno, void *user_data) {
         state.call_svc(state, imm, pc);
     }
 }
+*/
 
 static void enable_vfp_fpu(uc_engine *uc) {
     uint64_t c1_c0_2 = 0;
@@ -137,6 +160,7 @@ CPUStatePtr init_cpu(Address pc, Address sp, bool log_code, CallSVC call_svc, Me
     state->call_svc = call_svc;
     state->entry_point = pc;
 
+    /*
     if (!init(state->disasm)) {
         return CPUStatePtr();
     }
@@ -153,7 +177,6 @@ CPUStatePtr init_cpu(Address pc, Address sp, bool log_code, CallSVC call_svc, Me
         const uc_err err = uc_hook_add(state->uc.get(), &hh, UC_HOOK_CODE, reinterpret_cast<void *>(&code_hook), state.get(), 1, 0);
         assert(err == UC_ERR_OK);
     }
-
     if (LOG_MEM_ACCESS) {
         uc_err err = uc_hook_add(state->uc.get(), &hh, UC_HOOK_MEM_READ, reinterpret_cast<void *>(&read_hook), state.get(), 1, 0);
         assert(err == UC_ERR_OK);
@@ -168,9 +191,10 @@ CPUStatePtr init_cpu(Address pc, Address sp, bool log_code, CallSVC call_svc, Me
     err = uc_reg_write(state->uc.get(), UC_ARM_REG_SP, &sp);
     assert(err == UC_ERR_OK);
 
+    // TODO: Probably not needed
     err = uc_mem_map_ptr(state->uc.get(), 0, GB(4), UC_PROT_ALL, &mem.memory[0]);
     assert(err == UC_ERR_OK);
-
+    
     err = uc_reg_write(state->uc.get(), UC_ARM_REG_PC, &pc);
 
     assert(err == UC_ERR_OK);
@@ -178,37 +202,59 @@ CPUStatePtr init_cpu(Address pc, Address sp, bool log_code, CallSVC call_svc, Me
     err = uc_reg_write(state->uc.get(), UC_ARM_REG_LR, &pc);
 
     assert(err == UC_ERR_OK);
+    */
+    state->cb = std::make_unique<DynarmicCallbacks>();
+    if (!init(state->cb->disasm)) {
+        return CPUStatePtr();
+    }
+    Dynarmic::A32::UserConfig user_config;
+    user_config.callbacks = state->cb.get();
+    state->jit = std::make_unique<Dynarmic::A32::Jit>(user_config);
+    g_jit = state->jit.get();
 
-    enable_vfp_fpu(state->uc.get());
+    write_sp(*state, sp);
+
+    write_pc(*state, pc);
+
+    write_lr(*state, pc);
+
+    // enable_vfp_fpu(state->uc.get());
 
     return state;
 }
 
 int run(CPUState &state, bool callback) {
     std::uint32_t pc = read_pc(state);
-    bool thumb_mode = is_thumb_mode(state.uc.get());
+    bool thumb_mode = is_thumb_mode(state);
     if (thumb_mode) {
         pc |= 1;
     }
     if (callback) {
-        uc_reg_write(state.uc.get(), UC_ARM_REG_LR, &state.entry_point);
+        write_lr(state, state.entry_point);
+        //uc_reg_write(state.uc.get(), UC_ARM_REG_LR, &state.entry_point);
     }
-    uc_err err = uc_emu_start(state.uc.get(), pc, 0, 0, 1);
+    state.cb->ticks_left = 1;
+    write_pc(state, pc);
+    state.jit->Run();
+    // uc_err err = uc_emu_start(state.uc.get(), pc, 0, 0, 1);
     pc = read_pc(state);
-    thumb_mode = is_thumb_mode(state.uc.get());
+    thumb_mode = is_thumb_mode(state);
     if (thumb_mode) {
         pc |= 1;
     }
-    err = uc_emu_start(state.uc.get(), pc, state.entry_point & 0xfffffffe, 0, 0);
+    state.cb->ticks_left = 10000;
+    state.cb->until_pc = state.entry_point & 0xfffffffe; //TODO: doesn't work
+    write_pc(state, pc);
+    // err = uc_emu_start(state.uc.get(), pc, state.entry_point & 0xfffffffe, 0, 0);
 
-    if (err != UC_ERR_OK) {
-        std::uint32_t error_pc = read_pc(state);
-        uint32_t lr = read_lr(state);
-        LOG_CRITICAL("Unicorn error {} at: start PC: {} error PC {} LR: {}", log_hex(err), log_hex(pc), log_hex(error_pc), log_hex(lr));
-        return -1;
-    }
+    //if (err != UC_ERR_OK) {
+    //    std::uint32_t error_pc = read_pc(state);
+    //    uint32_t lr = read_lr(state);
+    //    LOG_CRITICAL("Unicorn error {} at: start PC: {} error PC {} LR: {}", log_hex(err), log_hex(pc), log_hex(error_pc), log_hex(lr));
+    //    return -1;
+    //}
     pc = read_pc(state);
-    thumb_mode = is_thumb_mode(state.uc.get());
+    thumb_mode = is_thumb_mode(state);
     if (thumb_mode) {
         pc |= 1;
     }
@@ -218,75 +264,108 @@ int run(CPUState &state, bool callback) {
 }
 
 void stop(CPUState &state) {
+
+    LOG_CRITICAL("trying to stop");
+    state.jit->HaltExecution();
+
+    /*
     const uc_err err = uc_emu_stop(state.uc.get());
     assert(err == UC_ERR_OK);
+    */
 }
 
 uint32_t read_reg(CPUState &state, size_t index) {
     assert(index >= 0);
     assert(index <= 3);
 
+    return state.jit->Regs()[index];
+    /*
     uint32_t value = 0;
     const uc_err err = uc_reg_read(state.uc.get(), UC_ARM_REG_R0 + index, &value);
     assert(err == UC_ERR_OK);
 
     return value;
+    */
 }
 
 float read_float_reg(CPUState &state, size_t index) {
     assert(index >= 0);
 
+    LOG_CRITICAL("read_float_reg");
+    return 0.0;
+
+    /*
     DoubleReg value;
 
     int single_index = index / 2;
     const uc_err err = uc_reg_read(state.uc.get(), UC_ARM_REG_D0 + single_index, &value);
     assert(err == UC_ERR_OK);
     return value.f[index % 2];
+    */
 }
 
 uint32_t read_sp(CPUState &state) {
+    /*
     uint32_t value = 0;
     const uc_err err = uc_reg_read(state.uc.get(), UC_ARM_REG_SP, &value);
     assert(err == UC_ERR_OK);
+    */
 
-    return value;
+    return state.jit->Regs()[13];
 }
 
 uint32_t read_pc(CPUState &state) {
+    /*
     uint32_t value = 0;
     const uc_err err = uc_reg_read(state.uc.get(), UC_ARM_REG_PC, &value);
     assert(err == UC_ERR_OK);
+    */
 
-    return value;
+    return state.jit->Regs()[15];
 }
 
 uint32_t read_lr(CPUState &state) {
+    /*
     uint32_t value = 0;
     const uc_err err = uc_reg_read(state.uc.get(), UC_ARM_REG_LR, &value);
     assert(err == UC_ERR_OK);
+    */
 
-    return value;
+    return state.jit->Regs()[14];
 }
 
 void write_reg(CPUState &state, size_t index, uint32_t value) {
     assert(index >= 0);
     assert(index <= 1);
 
+    state.jit->Regs()[index] = value;
+    /*
     const uc_err err = uc_reg_write(state.uc.get(), UC_ARM_REG_R0 + index, &value);
     assert(err == UC_ERR_OK);
+    */
 }
 
 void write_sp(CPUState &state, uint32_t value) {
+    state.jit->Regs()[13] = value;
+    /*
     const uc_err err = uc_reg_write(state.uc.get(), UC_ARM_REG_SP, &value);
     assert(err == UC_ERR_OK);
+    */
 }
 
 void write_pc(CPUState &state, uint32_t value) {
+    state.jit->Regs()[15] = value;
+
+    /*
     const uc_err err = uc_reg_write(state.uc.get(), UC_ARM_REG_PC, &value);
     assert(err == UC_ERR_OK);
+    */
 }
 
 void write_lr(CPUState &state, uint32_t value) {
+    state.jit->Regs()[14] = value;
+    /*
     const uc_err err = uc_reg_write(state.uc.get(), UC_ARM_REG_LR, &value);
     assert(err == UC_ERR_OK);
+    */
 }

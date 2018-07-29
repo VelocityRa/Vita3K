@@ -71,7 +71,7 @@ static size_t write_to_buffer(void *pOpaque, mz_uint64 file_ofs, const void *pBu
     return n;
 }
 
-bool read_file_from_disk(Buffer &buf, const char *file, HostState &host) {
+bool read_file_from_disk(Buffer &buf, const std::string &file, HostState &host) {
     std::string file_path = host.pref_path + "ux0/app/" + host.io.title_id + "/" + file;
     std::ifstream f(file_path, std::ifstream::binary);
     if (f.fail()) {
@@ -146,8 +146,7 @@ bool install_vpk(Ptr<const void> &entry_point, HostState &host, const std::wstri
     load_sfo(sfo_handle, params);
     find_data(host.io.title_id, sfo_handle, "TITLE_ID");
 
-    std::string output_base_path;
-    output_base_path = host.pref_path + "ux0/app/";
+    std::string output_base_path = host.pref_path + "ux0/app";
     std::string title_base_path = output_base_path;
     if (sfo_path.length() < 20) {
         output_base_path += host.io.title_id;
@@ -180,6 +179,7 @@ bool install_vpk(Ptr<const void> &entry_point, HostState &host, const std::wstri
             continue;
         }
         std::string output_path = output_base_path;
+
         output_path += "/";
         output_path += file_stat.m_filename;
         if (mz_zip_reader_is_file_a_directory(zip.get(), i)) {
@@ -188,7 +188,13 @@ bool install_vpk(Ptr<const void> &entry_point, HostState &host, const std::wstri
             const size_t slash = output_path.rfind('/');
             if (std::string::npos != slash) {
                 std::string directory = output_path.substr(0, slash);
-                fs::create_directories(directory);
+                try {
+                    fs::path directory_(directory);
+
+                    fs::create_directories(directory_);
+                } catch (std::experimental::filesystem::filesystem_error e) {
+                    e;
+                }
             }
 
             LOG_INFO("Extracting {}", output_path);
@@ -233,22 +239,58 @@ bool load_app_impl(Ptr<const void> &entry_point, HostState &host, const std::wst
 
     init_device_paths(host.io);
 
-    Buffer eboot;
-    if (!read_file_from_disk(eboot, "eboot.bin", host)) {
+    const CallImport call_import = [&host](CPUState &cpu, uint32_t nid, SceUID main_thread_id) {
+        ::call_import(host, cpu, nid, main_thread_id);
+    };
+
+    // Load pre-loaded libraries and run their `module_start` export
+    const char *const lib_load_list[] = {
+        //"sce_module/libfios2.suprx",
+        "sce_module/libc.suprx",
+    };
+
+    for (auto module_path : lib_load_list) {
+        Buffer module_buffer;
+        Ptr<const void> lib_entry_point;
+
+        if (read_file_from_disk(module_buffer, module_path, host)) {
+            SceUID module_id = load_self(lib_entry_point, host.kernel, host.mem, module_buffer.data(), std::string("app0:") + module_path);
+            if (module_id >= 0) {
+                const auto module = host.kernel.loaded_modules[module_id];
+                const auto module_name = module->module_name;
+                LOG_INFO("Module {} (at \"{}\") loaded", module_name, module_path);
+
+                if (std::string(module_name) == "SceLibFios2")
+                    continue;
+
+                Ptr<void> argp = Ptr<void>();
+                const SceUID module_thread_id = create_thread(lib_entry_point, host.kernel, host.mem, module_name, SCE_KERNEL_DEFAULT_PRIORITY_USER, SCE_KERNEL_STACK_SIZE_USER_DEFAULT, call_import, false);
+                const ThreadStatePtr module_thread = find(module_thread_id, host.kernel.threads);
+                const auto ret = run_on_current(*module_thread, lib_entry_point, 0, argp);
+                module_thread->to_do = ThreadToDo::exit;
+                module_thread->something_to_do.notify_all(); // TODO Should this be notify_one()?
+                host.kernel.running_threads.erase(module_thread_id);
+                host.kernel.threads.erase(module_thread_id);
+                LOG_INFO("Module {} (at \"{}\") module_start returned {}", module_name, module_path, log_hex(ret));
+            } else
+                return false;
+        } else
+            return false;
+    }
+
+    // Load main executable (eboot.bin)
+    Buffer eboot_buffer;
+    if (read_file_from_disk(eboot_buffer, "eboot.bin", host)) {
+        SceUID module_id = load_self(entry_point, host.kernel, host.mem, eboot_buffer.data(), "app0:eboot.bin");
+        if (module_id >= 0) {
+            const auto module = host.kernel.loaded_modules[module_id];
+            const auto module_name = module->module_name;
+            LOG_INFO("Main executable {} (eboot.bin) loaded", module_name);
+        } else
+            return false;
+    } else
         return false;
-    }
-
-    Buffer libc;
-    if (read_file_from_disk(libc, "sce_module/libc.suprx", host)) {
-        if (load_self(entry_point, host.kernel, host.mem, libc.data(), "app0:sce_module/libc.suprx") == 0) {
-            LOG_INFO("LIBC loaded");
-        }
-    }
-
-    if (load_self(entry_point, host.kernel, host.mem, eboot.data(), "app0:eboot.bin") < 0) {
-        return false;
-    }
-
+        
     return true;
 }
 
@@ -266,6 +308,7 @@ ExitCode load_app(Ptr<const void> &entry_point, HostState &host, const std::wstr
 }
 
 ExitCode run_app(HostState &host, Ptr<const void> &entry_point) {
+    //todo: copied
     const CallImport call_import = [&host](CPUState &cpu, uint32_t nid, SceUID main_thread_id) {
         ::call_import(host, cpu, nid, main_thread_id);
     };
@@ -277,16 +320,6 @@ ExitCode run_app(HostState &host, Ptr<const void> &entry_point) {
     }
 
     const ThreadStatePtr main_thread = find(main_thread_id, host.kernel.threads);
-    Ptr<void> argp = Ptr<void>();
-    if (!strncmp(host.kernel.loaded_modules.begin()->second->module_name, "SceLibc", 7)) {
-        const SceUID libc_thread_id = create_thread(host.kernel.loaded_modules.begin()->second->module_start, host.kernel, host.mem, "libc", SCE_KERNEL_DEFAULT_PRIORITY_USER, SCE_KERNEL_STACK_SIZE_USER_DEFAULT, call_import, false);
-        const ThreadStatePtr libc_thread = find(libc_thread_id, host.kernel.threads);
-        run_on_current(*libc_thread, host.kernel.loaded_modules.begin()->second->module_start, 0, argp);
-        libc_thread->to_do = ThreadToDo::exit;
-        libc_thread->something_to_do.notify_all(); // TODO Should this be notify_one()?
-        host.kernel.running_threads.erase(libc_thread_id);
-        host.kernel.threads.erase(libc_thread_id);
-    }
 
     if (start_thread(host.kernel, main_thread_id, 0, Ptr<void>()) < 0) {
         error_dialog("Failed to run main thread.", host.window.get());

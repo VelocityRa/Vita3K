@@ -52,7 +52,7 @@ static void alloc_inner(MemState &state, Address address, size_t page_count, All
 
 #ifdef WIN32
     const void *const ret = VirtualAlloc(memory, aligned_size, MEM_COMMIT, PAGE_READWRITE);
-    assert(ret == memory);
+    LOG_CRITICAL_IF(ret == NULL, "VirtualAlloc failed, error code: {}", log_hex(GetLastError()));
 #else
     mprotect(memory, aligned_size, PROT_READ | PROT_WRITE);
 #endif

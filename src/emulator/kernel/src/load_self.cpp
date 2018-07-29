@@ -49,8 +49,8 @@
 
 using namespace ELFIO;
 
-static const bool LOG_IMPORTS = false;
-static const bool LOG_EXPORTS = false;
+static const bool LOG_IMPORTS = true;
+static const bool LOG_EXPORTS = true;
 
 static bool load_var_imports(const uint32_t *nids, const Ptr<uint32_t> *entries, size_t count, KernelState &kernel, const MemState &mem) {
     for (size_t i = 0; i < count; ++i) {
@@ -191,7 +191,7 @@ static bool load_func_exports(Ptr<const void> &entry_point, const uint32_t *nids
         if (LOG_EXPORTS) {
             const char *const name = import_name(nid);
 
-            LOG_DEBUG("\tNID {} ({}) at {}", log_hex(nid), name, entry.address());
+            LOG_DEBUG("\tNID {} ({}) at {}", log_hex(nid), name, log_hex(entry.address()));
         }
     }
 
@@ -257,13 +257,23 @@ static bool load_exports(Ptr<const void> &entry_point, const sce_module_info_raw
     return true;
 }
 
-SceUID load_self(Ptr<const void> &entry_point, KernelState &kernel, MemState &mem, const void *self, const char *path) {
+SceUID load_self(Ptr<const void> &entry_point, KernelState &kernel, MemState &mem, const void *self, const std::string &path) {
     const uint8_t *const self_bytes = static_cast<const uint8_t *>(self);
     const SCE_header &self_header = *static_cast<const SCE_header *>(self);
 
     // assumes little endian host
-    if (!memcmp(&self_header.magic, "\0ECS", 4)) {
-        LOG_CRITICAL("(S)ELF is corrupt or encrypted. Decryption not yet supported.");
+    if (self_header.magic != 0x00454353) {
+        LOG_CRITICAL("SELF {} is corrupt or encrypted. Decryption is not yet supported.", path);
+        return -1;
+    }
+
+    if (self_header.version != 3) {
+        LOG_CRITICAL("SELF {} version {} is not supported.", path, self_header.version);
+        return -1;
+    }
+
+    if (self_header.header_type != 1) {
+        LOG_CRITICAL("SELF {} header type {} is not supported.", path, self_header.header_type);
         return -1;
     }
 
@@ -283,9 +293,9 @@ SceUID load_self(Ptr<const void> &entry_point, KernelState &kernel, MemState &me
         if (src.p_type == PT_LOAD) {
             Address segment_address = 0;
             if (elf.e_type == ET_SCE_EXEC) {
-                segment_address = alloc_at(mem, src.p_vaddr, src.p_memsz, path);
+                segment_address = alloc_at(mem, src.p_vaddr, src.p_memsz, path.c_str());
             } else {
-                segment_address = alloc(mem, src.p_memsz, path);
+                segment_address = alloc(mem, src.p_memsz, path.c_str());
             }
             const Ptr<void> address(segment_address);
             if (!address) {
@@ -350,7 +360,7 @@ SceUID load_self(Ptr<const void> &entry_point, KernelState &kernel, MemState &me
     sceKernelModuleInfo->tlsAreaSize = module_info->field_40;
     //SceSize tlsInitSize;
     //SceSize tlsAreaSize;
-    strncpy(sceKernelModuleInfo->path, path, 255);
+    strncpy(sceKernelModuleInfo->path, path.c_str(), 255);
 
     for (Elf_Half segment_index = 0; segment_index < elf.e_phnum; ++segment_index) {
         sceKernelModuleInfo->segments[segment_index].size = sizeof(sceKernelModuleInfo->segments[segment_index]);

@@ -178,7 +178,7 @@ EXPORT(int, sceKernelGetMsgPipeCreatorId) {
 }
 
 EXPORT(int, sceKernelGetProcessId) {
-    UNIMPLEMENTED();
+    STUBBED("0");
     return 0;
 }
 

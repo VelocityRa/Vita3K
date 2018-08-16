@@ -97,7 +97,7 @@ EXPORT(int, sceGxmBeginScene, SceGxmContext *context, unsigned int flags, const 
     assert(renderTarget != nullptr);
     assert(validRegion == nullptr);
     assert(vertexSyncObject == nullptr);
-    assert(colorSurface != nullptr);
+    //assert(colorSurface != nullptr);
     assert(depthStencil != nullptr);
 
     if (host.gxm.isInScene) {
@@ -118,7 +118,8 @@ EXPORT(int, sceGxmBeginScene, SceGxmContext *context, unsigned int flags, const 
     // TODO This may not be right.
     context->state.fragment_ring_buffer_used = 0;
     context->state.vertex_ring_buffer_used = 0;
-    context->state.color_surface = *colorSurface;
+    if (colorSurface)
+        context->state.color_surface = *colorSurface;
     context->state.depth_stencil_surface = *depthStencil;
 
     host.gxm.isInScene = true;
@@ -894,10 +895,17 @@ EXPORT(int, sceGxmReserveFragmentDefaultUniformBuffer, SceGxmContext *context, P
     assert(context != nullptr);
     assert(uniformBuffer != nullptr);
 
-    const auto fragment_program = context->state.vertex_program.get(host.mem);
+    const auto fragment_program = context->state.fragment_program.get(host.mem);
     const auto program = fragment_program->program.get(host.mem);
 
-    const size_t size = program->default_uniform_buffer_count * 4;
+    size_t size = program->default_uniform_buffer_count * 4;
+    size = size + 64 & ~(64 - 1);
+    
+    if (size == 0) {
+        *uniformBuffer = 0;
+        return 0;
+    }
+
     const size_t next_used = context->state.fragment_ring_buffer_used + size;
     assert(next_used <= context->state.params.fragmentRingBufferMemSize);
     if (next_used > context->state.params.fragmentRingBufferMemSize) {
@@ -907,7 +915,7 @@ EXPORT(int, sceGxmReserveFragmentDefaultUniformBuffer, SceGxmContext *context, P
     *uniformBuffer = context->state.params.fragmentRingBufferMem.cast<uint8_t>() + static_cast<int32_t>(context->state.fragment_ring_buffer_used);
     context->state.fragment_ring_buffer_used = next_used;
 
-    context->state.fragment_uniform_buffers[14] = *uniformBuffer;
+    context->state.fragment_uniform_buffers[SCE_GXM_DEFAULT_UNIFORM_BUFFER_CONTAINER_INDEX] = *uniformBuffer;
 
     return 0;
 }
@@ -923,7 +931,14 @@ EXPORT(int, sceGxmReserveVertexDefaultUniformBuffer, SceGxmContext *context, Ptr
     const auto vertex_program = context->state.vertex_program.get(host.mem);
     const auto program = vertex_program->program.get(host.mem);
 
-    const size_t size = program->default_uniform_buffer_count * 4;
+    size_t size = program->default_uniform_buffer_count * 4;
+    size = size + 64 & ~(64-1);
+
+    if (size == 0) {
+        *uniformBuffer = 0;
+        return 0;
+    }
+
     const size_t next_used = context->state.vertex_ring_buffer_used + size;
     assert(next_used <= context->state.params.vertexRingBufferMemSize);
     if (next_used > context->state.params.vertexRingBufferMemSize) {
@@ -933,7 +948,7 @@ EXPORT(int, sceGxmReserveVertexDefaultUniformBuffer, SceGxmContext *context, Ptr
     *uniformBuffer = context->state.params.vertexRingBufferMem.cast<uint8_t>() + static_cast<int32_t>(context->state.vertex_ring_buffer_used);
     context->state.vertex_ring_buffer_used = next_used;
 
-    context->state.vertex_uniform_buffers[14] = *uniformBuffer;
+    context->state.vertex_uniform_buffers[SCE_GXM_DEFAULT_UNIFORM_BUFFER_CONTAINER_INDEX] = *uniformBuffer;
 
     return 0;
 }
@@ -1116,12 +1131,13 @@ EXPORT(void, sceGxmSetTwoSidedEnable, SceGxmContext *context, SceGxmTwoSidedMode
 EXPORT(int, sceGxmSetUniformDataF, void *uniformBuffer, const SceGxmProgramParameter *parameter, unsigned int componentOffset, unsigned int componentCount, const float *sourceData) {
     assert(uniformBuffer != nullptr);
     assert(parameter != nullptr);
-    assert(parameter->container_index == 14);
+    assert(parameter->container_index == SCE_GXM_DEFAULT_UNIFORM_BUFFER_CONTAINER_INDEX);
     assert(componentCount > 0);
     assert(sourceData != nullptr);
 
     size_t size = componentCount * sizeof(float);
     size_t offset = componentOffset * sizeof(float);
+    // TODO: correct alignment
     memcpy(static_cast<uint8_t *>(uniformBuffer) + offset, sourceData, size);
     return 0;
 }
@@ -1237,7 +1253,6 @@ EXPORT(int, sceGxmShaderPatcherCreateFragmentProgram, SceGxmShaderPatcher *shade
     assert(programId != nullptr);
     assert(outputFormat == SCE_GXM_OUTPUT_REGISTER_FORMAT_UCHAR4);
     assert(multisampleMode == SCE_GXM_MULTISAMPLE_NONE);
-    assert(vertexProgram);
     assert(fragmentProgram != nullptr);
 
     static const emu::SceGxmBlendInfo default_blend_info = {

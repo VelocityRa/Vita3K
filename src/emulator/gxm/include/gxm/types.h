@@ -10,6 +10,8 @@
 #include <memory>
 #include <mutex>
 
+#define SCE_GXM_DEFAULT_UNIFORM_BUFFER_CONTAINER_INDEX 0xE
+
 namespace renderer {
 struct FragmentProgram;
 struct VertexProgram;
@@ -197,7 +199,7 @@ public:
     std::uint8_t unk16;
     std::uint8_t unk17;
 
-    std::uint32_t unk18;
+    std::uint32_t fragment_inputs; // bitfield of fragment program inputs (?)
     std::uint32_t unk1C;
 
     std::uint32_t unk20;

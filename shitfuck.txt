@@ -1,0 +1,25 @@
+
+// WORKS
+[19:20:02.622] |E| [renderer::set_uniform]:  loc: 2, comp_c: 1, arr_sz: 1, val: { 1 }
+[19:20:02.623] |E| [renderer::set_uniform]:  loc: 0, comp_c: 4, arr_sz: 4, val: { 0.00208333, 0, 0, 0, 0, -0.00367647, 0, 0, 0, 0, -1, 0, -1, 1, -0, 1 }
+
+[19:24:10.461] |E| [renderer::set_uniform]:  loc: 0, comp_c: 4, arr_sz: 4, val: { 0.00208333, 0, 0, 0, 0, -0.00367647, 0, 0, 0, 0, -1, 0, -1, 1, -0, 1 }
+[19:24:10.461] |E| [renderer::set_uniform]:  loc: 3, comp_c: 1, arr_sz: 1, val: { 1 }
+[19:24:10.464] |E| [renderer::set_uniform]:  loc: 2, comp_c: 1, arr_sz: 1, val: { 1 }
+
+// NOT WORKS
+[19:22:58.440] |E| [renderer::set_uniform]:  loc: 2, comp_c: 1, arr_sz: 1, val: { 1 }
+[19:22:58.440] |E| [renderer::set_uniform]:  loc: 0, comp_c: 4, arr_sz: 4, val: { 0.00208333, 0, 0, 0, 0, -0.00367647, 0, 0, 0, 0, -1, 0, -1, 1, -0, 1 }
+
+[19:23:09.675] |E| [renderer::set_uniform]:  loc: 0, comp_c: 4, arr_sz: 4, val: { 0.00208333, 0, 0, 0, 0, -0.00367647, 0, 0, 0, 0, -1, 0, -1, 1, -0, 1 }
+[19:23:09.676] |E| [renderer::set_uniform]:  loc: 3, comp_c: 1, arr_sz: 1, val: { 0 }  <--
+[19:23:09.682] |E| [renderer::set_uniform]:  loc: 2, comp_c: 1, arr_sz: 1, val: { 1 }
+
+
+
+set_uniforms offsets seem correct
+the problem seems to be the address of WRITING the values
+
+0x0000020427F570D0 -    where it is read
+0x0000020427F57120 =    where it is written
+0x50

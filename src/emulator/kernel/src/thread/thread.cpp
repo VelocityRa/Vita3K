@@ -51,6 +51,8 @@ static int SDLCALL thread_function(void *data) {
     assert(succeeded);
     const uint32_t r0 = read_reg(*thread->cpu, 0);
 
+    const std::lock_guard<std::mutex> lock(thread->mutex);
+
     for (auto &waiting_thread : thread->waiting_threads) {
         waiting_thread->to_do = ThreadToDo::run;
         waiting_thread->something_to_do.notify_all();
@@ -124,7 +126,7 @@ int start_thread(KernelState &kernel, const SceUID &thid, SceSize arglen, const 
             thread->to_do = ThreadToDo::exit;
         }
         thread->something_to_do.notify_all(); // TODO Should this be notify_one()?
-        SDL_WaitThread(running_thread, nullptr);
+        //SDL_WaitThread(running_thread, nullptr);
     };
 
     const ThreadPtr running_thread(SDL_CreateThread(&thread_function, waiting->second.name.c_str(), &params), delete_thread);

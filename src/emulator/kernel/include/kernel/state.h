@@ -184,6 +184,7 @@ using LoadedSysmodules = std::vector<SceSysmoduleModuleId>;
 
 struct KernelState {
     std::mutex mutex;
+    std::mutex thread_mutex; // used for threads, running_threads, waiting_threads
     Blocks blocks;
     ThreadToSlotToAddress tls;
     SemaphorePtrs semaphores;
@@ -192,9 +193,9 @@ struct KernelState {
     MutexPtrs mutexes;
     MutexPtrs lwmutexes; // also Mutexes for now
     EventFlagPtrs eventflags;
-    ThreadStatePtrs threads;
-    ThreadPtrs running_threads;
-    KernelWaitingThreadStates waiting_threads;
+    ThreadStatePtrs threads; // protected by thread_mutex
+    ThreadPtrs running_threads; // protected by thread_mutex
+    KernelWaitingThreadStates waiting_threads; // protected by thread_mutex
     SceKernelModuleInfoPtrs loaded_modules;
     LoadedSysmodules loaded_sysmodules;
     ExportNids export_nids;

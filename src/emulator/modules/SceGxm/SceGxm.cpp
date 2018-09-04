@@ -288,7 +288,7 @@ EXPORT(int, sceGxmDepthStencilSurfaceGetStrideInSamples) {
 
 EXPORT(int, sceGxmDepthStencilSurfaceInit, emu::SceGxmDepthStencilSurface *surface, SceGxmDepthStencilFormat depthStencilFormat, SceGxmDepthStencilSurfaceType surfaceType, unsigned int strideInSamples, Ptr<void> depthData, Ptr<void> stencilData) {
     assert(surface != nullptr);
-    assert(surfaceType == SCE_GXM_DEPTH_STENCIL_SURFACE_TILED);
+    //assert(surfaceType == SCE_GXM_DEPTH_STENCIL_SURFACE_TILED);
     assert(strideInSamples > 0);
     assert(depthData);
 
@@ -588,7 +588,7 @@ EXPORT(int, sceGxmInitialize, const emu::SceGxmInitializeParams *params) {
 
     const ThreadPtr running_thread(SDL_CreateThread(&thread_function, "SceGxmDisplayQueue", &gxm_params), delete_thread);
     SDL_SemWait(gxm_params.host_may_destroy_params.get());
-    host.kernel.running_threads.emplace(display_thread_id, running_thread);
+    add_running_thread(host.kernel, display_thread_id, running_thread);
     host.gxm.notification_region = Ptr<uint32_t>(alloc(host.mem, MB(1), "SceGxmNotificationRegion"));
     memset(host.gxm.notification_region.get(host.mem), 0, MB(1));
     return 0;

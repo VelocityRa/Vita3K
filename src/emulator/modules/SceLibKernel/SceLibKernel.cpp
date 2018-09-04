@@ -1137,10 +1137,7 @@ EXPORT(int, sceKernelLoadStartModule, char *path, SceSize args, Ptr<void> argp, 
     if (status)
         *status = result;
 
-    thread->to_do = ThreadToDo::exit;
-    thread->something_to_do.notify_all(); // TODO Should this be notify_one()?
-    host.kernel.running_threads.erase(thid);
-    host.kernel.threads.erase(thid);
+    exit_and_delete_thread(host.kernel, thread, thid);
 
     return mod_id;
 }
@@ -1405,31 +1402,13 @@ EXPORT(int, sceKernelWaitSignalCB) {
     return UNIMPLEMENTED();
 }
 
-int wait_thread_end(HostState &host, SceUID thread_id, SceUID thid) {
-    const ThreadStatePtr cur_thread = lock_and_find(thread_id, host.kernel.threads, host.kernel.mutex);
-
-    {
-        const std::lock_guard<std::mutex> lock(cur_thread->mutex);
-        assert(cur_thread->to_do == ThreadToDo::run);
-        cur_thread->to_do = ThreadToDo::wait;
-        stop(*cur_thread->cpu);
-    }
-
-    {
-        const ThreadStatePtr thread = lock_and_find(thid, host.kernel.threads, host.kernel.mutex);
-        const std::lock_guard<std::mutex> lock(thread->mutex);
-        thread->waiting_threads.push_back(cur_thread);
-    }
-
-    return SCE_KERNEL_OK;
-}
-
 EXPORT(int, sceKernelWaitThreadEnd, SceUID thid, int *stat, SceUInt *timeout) {
-    return wait_thread_end(host, thread_id, thid);
+    return wait_thread_end(host.kernel, thread_id, thid);
 }
 
 EXPORT(int, sceKernelWaitThreadEndCB, SceUID thid, int *stat, SceUInt *timeout) {
-    return wait_thread_end(host, thread_id, thid);
+    STUBBED("no CB");
+    return wait_thread_end(host.kernel, thread_id, thid);
 }
 
 EXPORT(int, sceSblACMgrIsGameProgram) {

@@ -96,19 +96,26 @@ SceUID create_thread(Ptr<const void> entry_point, KernelState &kernel, MemState 
 
     WaitingThreadState waiting{ name };
 
-    const std::unique_lock<std::mutex> lock(kernel.mutex);
-    kernel.threads.emplace(thid, thread);
-    kernel.waiting_threads.emplace(thid, waiting);
+    {
+        const std::lock_guard<std::mutex> thread_lock(kernel.thread_mutex);
 
+        kernel.threads.emplace(thid, thread);
+        kernel.waiting_threads.emplace(thid, waiting);
+    }
     return thid;
 }
 
 int start_thread(KernelState &kernel, const SceUID &thid, SceSize arglen, const Ptr<void> &argp) {
     const std::unique_lock<std::mutex> lock(kernel.mutex);
 
-    const KernelWaitingThreadStates::const_iterator waiting = kernel.waiting_threads.find(thid);
-    if (waiting == kernel.waiting_threads.end()) {
-        return SCE_KERNEL_ERROR_UNKNOWN_THREAD_ID;
+    KernelWaitingThreadStates::const_iterator waiting;
+    {
+        const std::lock_guard<std::mutex> thread_lock(kernel.thread_mutex);
+
+        waiting = kernel.waiting_threads.find(thid);
+        if (waiting == kernel.waiting_threads.end()) {
+            return SCE_KERNEL_ERROR_UNKNOWN_THREAD_ID;
+        }
     }
 
     const ThreadStatePtr thread = find(thid, kernel.threads);
@@ -126,7 +133,7 @@ int start_thread(KernelState &kernel, const SceUID &thid, SceSize arglen, const 
             thread->to_do = ThreadToDo::exit;
         }
         thread->something_to_do.notify_all(); // TODO Should this be notify_one()?
-        //SDL_WaitThread(running_thread, nullptr);
+        SDL_WaitThread(running_thread, nullptr);
     };
 
     const ThreadPtr running_thread(SDL_CreateThread(&thread_function, waiting->second.name.c_str(), &params), delete_thread);
@@ -134,8 +141,13 @@ int start_thread(KernelState &kernel, const SceUID &thid, SceSize arglen, const 
         return SCE_KERNEL_ERROR_THREAD_ERROR;
     }
 
-    kernel.waiting_threads.erase(waiting);
-    kernel.running_threads.emplace(thid, running_thread);
+    {
+        const std::lock_guard<std::mutex> thread_lock(kernel.thread_mutex);
+
+        kernel.waiting_threads.erase(waiting);
+        kernel.running_threads.emplace(thid, running_thread);
+    }
+
     SDL_SemWait(params.host_may_destroy_params.get());
     return SCE_KERNEL_OK;
 }
@@ -209,4 +221,61 @@ uint32_t run_on_current(ThreadState &thread, const Ptr<const void> entry_point, 
     lock.unlock();
     run_thread(thread, false);
     return read_reg(*thread.cpu, 0);
+}
+
+void add_running_thread(KernelState &kernel, const SceUID display_thread_id, const ThreadPtr running_thread) {
+    const std::lock_guard<std::mutex> thread_lock(kernel.thread_mutex);
+
+    kernel.running_threads.emplace(display_thread_id, running_thread);
+}
+
+void delete_thread(KernelState &kernel, SceUID thread_id) {
+    const std::lock_guard<std::mutex> thread_lock(kernel.thread_mutex);
+
+    kernel.running_threads.erase(thread_id);
+    kernel.waiting_threads.erase(thread_id);
+    kernel.threads.erase(thread_id);
+}
+
+int wait_thread_end(KernelState &kernel, SceUID thread_id, SceUID thid) {
+    const ThreadStatePtr cur_thread = lock_and_find(thread_id, kernel.threads, kernel.mutex);
+
+    {
+        const std::lock_guard<std::mutex> lock(cur_thread->mutex);
+        assert(cur_thread->to_do == ThreadToDo::run);
+        cur_thread->to_do = ThreadToDo::wait;
+        stop(*cur_thread->cpu);
+    }
+
+    {
+        const ThreadStatePtr thread = lock_and_find(thid, kernel.threads, kernel.mutex);
+        const std::lock_guard<std::mutex> lock(thread->mutex);
+        thread->waiting_threads.push_back(cur_thread);
+    }
+
+    return SCE_KERNEL_OK;
+}
+
+void stop_and_exit_thread(const ThreadStatePtr thread) {
+    std::unique_lock<std::mutex> thread_lock(thread->mutex);
+
+    thread->to_do = ThreadToDo::exit;
+    stop(*thread->cpu);
+    thread->something_to_do.notify_all();
+
+    for (auto t : thread->waiting_threads) {
+        const std::lock_guard<std::mutex> lock(t->mutex);
+        assert(t->to_do == ThreadToDo::wait);
+        t->to_do = ThreadToDo::run;
+        t->something_to_do.notify_one();
+    }
+
+    thread->waiting_threads.clear();
+}
+
+void exit_and_delete_thread(KernelState &kernel, const ThreadStatePtr &thread_state, SceUID thread_id) {
+    thread_state->to_do = ThreadToDo::exit;
+    thread_state->something_to_do.notify_all(); // TODO Should this be notify_one()?
+
+    delete_thread(kernel, thread_id);
 }

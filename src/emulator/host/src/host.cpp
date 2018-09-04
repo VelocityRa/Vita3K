@@ -162,8 +162,8 @@ bool init(HostState &state, Config cfg) {
         const std::lock_guard<std::mutex> lock(thread->mutex);
         if (thread->to_do == ThreadToDo::wait) {
             thread->to_do = ThreadToDo::run;
+            thread->something_to_do.notify_all();
         }
-        thread->something_to_do.notify_all();
     };
 
     state.cfg = std::move(cfg);

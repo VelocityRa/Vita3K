@@ -9,6 +9,7 @@
 
 #include <fstream>
 #include <sstream>
+#include <utility>
 
 using namespace glbinding;
 
@@ -52,7 +53,7 @@ static void dump_missing_shader(const char *hash, const char *extension, const S
     }
 }
 
-std::string load_shader(emu::SceGxmProgramType program_type, GLSLCache &cache, const SceGxmProgram &program, const char *base_path) {
+std::string load_shader(GLSLCache &cache, const SceGxmProgram &program, const char *base_path) {
     const Sha256Hash hash_bytes = sha256(&program, program.size);
     const GLSLCache::const_iterator cached = cache.find(hash_bytes);
     if (cached != cache.end()) {
@@ -63,13 +64,17 @@ std::string load_shader(emu::SceGxmProgramType program_type, GLSLCache &cache, c
         return type == emu::Vertex ? "vert" : type == emu::Fragment ? "frag" : "unknown";
     };
 
+    emu::SceGxmProgramType program_type = program.get_type();
     const char *shader_type_str = shader_type_to_str(program_type);
 
     const Sha256HashText hash_text = hex(hash_bytes);
+    //LOG_INFO("Loading {} ", (char*)&hash_text);
     std::string source = load_shader(hash_text.data(), shader_type_str, base_path);
     if (source.empty()) {
-        LOG_ERROR("Missing {} shader {}", shader_type_str, hash_text.data());
-        source = shader::convert_gxp_to_glsl(program, program_type);
+        LOG_INFO("Generating {} shader {}", shader_type_str, hash_text.data());
+
+        source = shader::convert_gxp_to_glsl(program, hash_text.data());
+
         dump_missing_shader(hash_text.data(), shader_type_str, program, source.c_str());
     }
 

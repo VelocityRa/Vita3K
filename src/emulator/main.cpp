@@ -24,6 +24,7 @@
 #include <host/state.h>
 #include <host/version.h>
 #include <kernel/thread/thread_functions.h>
+#include <shader/functions.h>
 #include <util/log.h>
 #include <util/string_utils.h>
 
@@ -41,6 +42,12 @@ int main(int argc, char *argv[]) {
         return ret;
 
     LOG_INFO("{}", window_title);
+
+    if (cfg.recompile_shader_path) {
+        LOG_INFO("Recompiling {}", *cfg.recompile_shader_path);
+        shader::convert_gxp_to_glsl_from_filepath(*cfg.recompile_shader_path);
+        return Success;
+    }
 
     std::atexit(SDL_Quit);
     if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC | SDL_INIT_VIDEO) < 0) {

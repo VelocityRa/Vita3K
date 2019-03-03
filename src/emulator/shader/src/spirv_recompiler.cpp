@@ -295,7 +295,7 @@ static spv::Id create_param_sampler(spv::Builder &b, SpirvShaderParameters &para
     spv::Id sampled_image_type = b.makeSampledImageType(image_type);
     std::string name = gxp::parameter_name_raw(parameter);
 
-    return create_spirv_var_reg(b, parameters, name, usse::RegisterBank::SECATTR, 2, sampled_image_type);
+    return b.createVariable(spv::StorageClassUniformConstant, sampled_image_type, name.c_str());
 }
 
 static void create_vertex_outputs(spv::Builder &b, SpirvShaderParameters &parameters, const SceGxmProgram &program) {
@@ -387,7 +387,7 @@ static void create_fragment_inputs(spv::Builder &b, SpirvShaderParameters &param
             std::string pa_name;
 
             if (input_id & 0x40000000) {
-                pa_name = "in_SpriteCoord";
+                pa_name = "v_SpriteCoord";
             } else {
                 pa_name = name_map.at(input_id);
             }
@@ -509,7 +509,7 @@ static void create_fragment_inputs(spv::Builder &b, SpirvShaderParameters &param
             if (coords[tex_coord_index] == spv::NoResult) {
                 // Create an 'in' variable
                 // TODO: this really right?
-                std::string coord_name = "input_TexCoord";
+                std::string coord_name = "v_TexCoord";
                 coord_name += std::to_string(tex_coord_index);
 
                 coords[tex_coord_index] = b.createVariable(spv::StorageClassInput,

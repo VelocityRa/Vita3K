@@ -29,6 +29,9 @@
 #include <iomanip>
 #include <iostream>
 
+#define INTNO_SVC_CALL 2
+#define INTNO_ASSERTION 7
+
 typedef std::unique_ptr<uc_struct, std::function<void(uc_struct *)>> UnicornPtr;
 
 union DoubleReg {
@@ -89,28 +92,62 @@ static void write_hook(uc_engine *uc, uc_mem_type type, uint64_t address, int si
 }
 
 static void intr_hook(uc_engine *uc, uint32_t intno, void *user_data) {
-    assert(intno == 2);
+    assert(intno == INTNO_SVC_CALL || intno == INTNO_ASSERTION);
 
     CPUState &state = *static_cast<CPUState *>(user_data);
 
-    uint32_t pc = 0;
-    uc_err err = uc_reg_read(uc, UC_ARM_REG_PC, &pc);
+    switch (intno) {
+    case INTNO_ASSERTION: {
+        uc_err err;
+#define GET_REG(local_name, reg_name)                          \
+    uint32_t local_name = 0;                                   \
+    err = uc_reg_read(uc, UC_ARM_REG_##reg_name, &local_name); \
     assert(err == UC_ERR_OK);
 
-    if (is_thumb_mode(uc)) {
-        const Address svc_address = pc - 2;
-        uint16_t svc_instruction = 0;
-        err = uc_mem_read(uc, svc_address, &svc_instruction, sizeof(svc_instruction));
+        GET_REG(pc, PC);
+        GET_REG(lr, LR);
+        GET_REG(sp, SP);
+        GET_REG(fpscr, FPSCR);
+        GET_REG(cpsr, CPSR);
+        GET_REG(r0, R0);
+        GET_REG(r1, R1);
+        GET_REG(r2, R2);
+        GET_REG(r3, R3);
+#undef GET_REG
+
+        std::string assert_msg = fmt::format(
+            "Guest code hit an assertion!\n"
+            "PC: {}\tLR: {}\tSP: {}\n"
+            "R0: {}\tR1: {}\tR2: {}\tR3: {}\n"
+            "CPSR: {}\tFPSCR: {}",
+            log_hex(pc), log_hex(lr), log_hex(sp), log_hex(r0), log_hex(r1), log_hex(r2), log_hex(r3), log_hex(cpsr), log_hex(fpscr));
+        LOG_CRITICAL("{}", assert_msg);
+        assert(0);
+        // TODO: quit gracefully
+        return;
+    }
+
+    case INTNO_SVC_CALL: {
+        uint32_t pc = 0;
+        uc_err err = uc_reg_read(uc, UC_ARM_REG_PC, &pc);
         assert(err == UC_ERR_OK);
-        const uint8_t imm = svc_instruction & 0xff;
-        state.call_svc(state, imm, pc);
-    } else {
-        const Address svc_address = pc - 4;
-        uint32_t svc_instruction = 0;
-        err = uc_mem_read(uc, svc_address, &svc_instruction, sizeof(svc_instruction));
-        assert(err == UC_ERR_OK);
-        const uint32_t imm = svc_instruction & 0xffffff;
-        state.call_svc(state, imm, pc);
+
+        if (is_thumb_mode(uc)) {
+            const Address svc_address = pc - 2;
+            uint16_t svc_instruction = 0;
+            err = uc_mem_read(uc, svc_address, &svc_instruction, sizeof(svc_instruction));
+            assert(err == UC_ERR_OK);
+            const uint8_t imm = svc_instruction & 0xff;
+            state.call_svc(state, imm, pc);
+        } else {
+            const Address svc_address = pc - 4;
+            uint32_t svc_instruction = 0;
+            err = uc_mem_read(uc, svc_address, &svc_instruction, sizeof(svc_instruction));
+            assert(err == UC_ERR_OK);
+            const uint32_t imm = svc_instruction & 0xffffff;
+            state.call_svc(state, imm, pc);
+        }
+    } break;
     }
 }
 

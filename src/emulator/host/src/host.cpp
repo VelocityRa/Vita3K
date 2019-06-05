@@ -24,7 +24,12 @@
 #include <util/lock_and_find.h>
 #include <util/log.h>
 
+#ifdef NDEBUG
+static constexpr bool LOG_IMPORT_CALLS = false;
+#else
 static bool LOG_IMPORT_CALLS = false;
+#endif
+
 static constexpr bool LOG_UNK_NIDS_ALWAYS = false;
 
 #define NID(name, nid) extern const ImportFn import_##name;
@@ -91,6 +96,8 @@ void call_import(HostState &host, CPUState &cpu, uint32_t nid, SceUID thread_id)
     }
 }
 
+#ifndef NDEBUG
 void log_import_calls(bool enabled) {
     LOG_IMPORT_CALLS = enabled;
 }
+#endif
